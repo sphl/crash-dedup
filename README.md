@@ -50,3 +50,9 @@ Options:
                                   The distance metric the tool should use.
   --help                          Show this message and exit.
 ```
+
+Example
+
+```bash
+crash-dedup find-crash-clusters --input-directory /path/to/fuzzer_crashes --fuzzer afl --fuzzer aflfast --target-program gif2png --distance-metric levenstein --max-no-of-crashes-per-fuzzer 50
+```
