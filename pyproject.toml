@@ -35,6 +35,11 @@ flake8-pytest-style = "^1.3.0"
 flake8-gl-codeclimate = "^0.1.4"
 flake8-html = "^0.4.1"
 
+[tool.poetry.scripts]
+crash-dedup = 'crash_dedup.main:main_group'
+
+
 [build-system]
 requires = ["poetry-core>=1.0.0"]
 build-backend = "poetry.core.masonry.api"
+

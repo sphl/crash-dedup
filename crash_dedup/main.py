@@ -74,8 +74,8 @@ def main_group() -> None:
     "--output-directory",
     "-o",
     type=click_Path(writable=True, file_okay=False),
+    default="output",
     help="The directory in which the script stores the result.",
-    prompt=True,
 )
 @option("--epsilon", "-e", type=float, default=None, help="The epsilon.")
 @option(
@@ -83,7 +83,7 @@ def main_group() -> None:
     "-f",
     type=Choice(FUZZERS),
     multiple=True,
-    help="All the fuzzers you want to test.",
+    help="All the fuzzers you want to test. You can pass multiple fuzzers.",
     default=(),
 )
 @option(
@@ -91,7 +91,7 @@ def main_group() -> None:
     "-t",
     type=Choice(TARGETS),
     multiple=True,
-    help="All programms you want to test",
+    help="All programs you want to test. You can pass multiple programs.",
     default=(),
 )
 @option(
@@ -120,8 +120,7 @@ def find_crash_clusters(
     overwrite: bool,
 ) -> None:
     """
-
-    :return:
+    Find clusters of crashes from different programs, different fuzzers, different metrics, different epsilons.
     """
     if epsilon is None:
         epsilon = DEFAULT_EPSILONS.get(distance_metric)
