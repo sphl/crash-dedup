@@ -2,16 +2,18 @@
 Main.
 """
 import itertools
-import json
 import multiprocessing
 import os
 import shutil
+from dataclasses import dataclass
+from functools import partial
 from logging import INFO, basicConfig, getLogger
 from os import path
 from pathlib import Path as pathlib_Path
 from re import compile as re_compile
 from sys import exc_info, stdout
 from typing import (
+    AbstractSet,
     Any,
     Callable,
     Dict,
@@ -42,6 +44,7 @@ from strsimpy.sorensen_dice import SorensenDice
 
 # from kneebow.rotor import Rotor
 # from sklearn.neighbors import NearestNeighbors
+OUTPUT_CSV_FILE_NAME = "fuzzer_crashes.csv"
 
 basicConfig(
     format="%(levelname)s: %(asctime)s: %(name)s: %(message)s",
@@ -79,6 +82,14 @@ FUZZERS: Sequence[str] = (
 )
 N_FRAMES = 3
 SEEDS = ["02"]
+
+# Dictionary with functions to the respective similarity metrics
+DISTANCE_METRICS = {
+    # "cosine"      : Cosine(2).distance,
+    # "jaro-winkler": JaroWinkler().distance,
+    "sorensen": SorensenDice(2).distance,
+    "levenstein": NormalizedLevenshtein().distance,
+}
 
 _FUZZER_TYPES = Literal[
     "afl",
@@ -118,24 +129,30 @@ class Crash(TypedDict):
     cluster_id: int
 
 
+def _get_file_content(file: pathlib_Path, n_frames: Optional[int]) -> str:
+    if n_frames is None:
+        file_content = file.read_text()
+    else:
+        with file.open() as f_read:
+            file_content = " ".join(f_read.readlines()[:n_frames])
+    return file_content
+
+
 def read_crashes(
-    fuzzer: str,
+    fuzzer: _FUZZER_TYPES,
     crash_dir: pathlib_Path,
     max_no_of_crashes: int,
     n_frames: int = None,
 ) -> List[Crash]:
-    """Read all (stack-)traces in 'crash_dir'.
-    :param max_no_of_crashes:
     """
-
-    def get_file_content(file: str) -> str:
-        if n_frames is None:
-            file_content = read(file)
-        else:
-            file_content = " ".join(read_lines(file)[:n_frames])
-
-        return file_content
-
+     Read all (stack-)traces in 'crash_dir'.
+    :param fuzzer:
+    :param crash_dir:
+    :param max_no_of_crashes:
+    :param n_frames:
+    :return:
+    """
+    get_file_content = partial(_get_file_content, n_frames=n_frames)
     crashes: List[Crash] = [
         {
             "fuzzer": fuzzer,
@@ -152,41 +169,14 @@ def read_crashes(
         return result_list[:max_no_of_crashes]
 
 
-def read(file: str, mode: str = "r") -> str:
-    """Opens 'file' with 'mode', reads it and then returns its contents."""
-    with open(file, mode) as fh:
-        return fh.read()
+def not_in(s: str, black_list: List[str]) -> bool:
+    """
 
-
-def read_lines(file: str, mode: str = "r") -> List[str]:
-    """Opens 'file' with 'mode', reads each line seperately and then returns its contents as list."""
-    with open(file, mode) as fh:
-        return [line for line in fh.readlines()]
-
-
-def write(file: str, text: str, mode: str = "w") -> None:
-    """Opens 'file' with 'mode' and writes 'text' to it."""
-    with open(file, mode) as fh:
-        fh.write(text)
-
-
-def append(file: str, line: str) -> None:
-    """Appends 'line' to 'file'."""
-    write(file, line + os.linesep, "a")
-
-
-def write_json(file: str, data: Dict) -> None:
-    """Write 'data' into JSON 'file'."""
-    write(file, json.dumps(data, indent=4))
-
-
-def read_json(file: str) -> Dict:
-    """Read data stored in JSON 'file'."""
-    return json.loads(read(file))
-
-
-def not_in(s: str, l: List[str]) -> bool:
-    for v in l:
+    :param s:
+    :param black_list:
+    :return:
+    """
+    for v in black_list:
         if s.endswith(v):
             return False
     return True
@@ -224,7 +214,7 @@ def find_files(
     exclude_dirs: Optional[List[str]] = None,
     exclude_files: Optional[List[str]] = None,
     recursive: bool = False,
-) -> List[str]:
+) -> List[pathlib_Path]:
     """
 
     :param source_dir:
@@ -239,8 +229,8 @@ def find_files(
     if exclude_dirs is None:
         exclude_dirs = []
 
-    source_files = []
     extension_matcher = create_matcher_for_file_extensions(file_exts)
+    not_in_matcher = partial(not_in, black_list=exclude_files)
     if recursive:
         source_files = [
             path.join(root, file)
@@ -250,16 +240,7 @@ def find_files(
         ]
     else:
         source_files = [f for f in source_dir.iterdir() if extension_matcher(f.name)]
-    return list(filter(lambda f: not_in(f, exclude_files), source_files))
-
-
-# Dictionary with functions to the respective similarity metrics
-distance_metrics = {
-    # "cosine"      : Cosine(2).distance,
-    # "jaro-winkler": JaroWinkler().distance,
-    "sorensen": SorensenDice(2).distance,
-    "levenstein": NormalizedLevenshtein().distance,
-}
+    return [pathlib_Path(f) for f in source_files if not_in_matcher(f)]
 
 
 def draw_venn_diagram(
@@ -342,6 +323,16 @@ def get_crash_clusters(
     return model.labels_
 
 
+def to_string(c: Iterable, sep: str = ",") -> str:
+    """
+
+    :param c:
+    :param sep:
+    :return:
+    """
+    return sep.join([str(v) for v in c])
+
+
 def get_crash_dir(
     crash_root: pathlib_Path, fuzzer: _FUZZER_TYPES, target: str, seed: str
 ) -> pathlib_Path:
@@ -363,9 +354,49 @@ def get_crash_dir(
     )
 
 
+@dataclass()
+class Record(object):
+    """
+    Record.
+    """
+
+    target: _TARGET_TYPES
+    fuzzer1: _FUZZER_TYPES
+    fuzzer2: _FUZZER_TYPES
+    seed: str
+    metric: _METRIC_TYPES
+    epsilon: float
+    n_frames: Optional[int]
+    cluster_ids1: AbstractSet[int]
+    cluster_ids2: AbstractSet[int]
+    shared_cluster_ids: AbstractSet[int]
+
+    def to_dict(self) -> Dict[str, Any]:
+        """
+
+        :return:
+        """
+        return {
+            "Target": self.target,
+            "Fuzzer 1": self.fuzzer1,
+            "Fuzzer 2": self.fuzzer2,
+            "Seed": self.seed,
+            "Metric": self.metric,
+            "Epsilon (DBSCAN)": self.epsilon,
+            "#Frames (Stacktraces)": "all" if self.n_frames is None else self.n_frames,
+            "#Bugs (Fuzzer 1)": len(self.cluster_ids1),
+            "#Bugs (Fuzzer 2)": len(self.cluster_ids2),
+            "Cluster IDs (Fuzzer 1)": to_string(self.cluster_ids1),
+            "Cluster IDs (Fuzzer 2)": to_string(self.cluster_ids1),
+            "#Unique Bugs (Fuzzer 1)": len(self.cluster_ids1 - self.shared_cluster_ids),
+            "#Unique Bugs (Fuzzer 2)": len(self.cluster_ids2 - self.shared_cluster_ids),
+            "#Shared Bugs (Fuzzer 1 & 2)": len(self.shared_cluster_ids),
+        }
+
+
 def crash_analysis_worker(
     crash_root: pathlib_Path,
-    target: str,
+    target: _TARGET_TYPES,
     fuzzer1: _FUZZER_TYPES,
     fuzzer2: _FUZZER_TYPES,
     seed: str,
@@ -375,16 +406,12 @@ def crash_analysis_worker(
     output_dir: pathlib_Path,
     draw_venn: bool,
     max_no_of_crashes: int,
-) -> Dict:
+) -> Record:
     """
     Worker routine which (1) reads and clusters the crash-stacktraces of both
     fuzzers, (2) draws a Venn diagram (if 'draw_venn' is set to true) and (3)
     finally returns some key figures of the crash analysis.
     """
-
-    def to_string(c: Iterable, sep: str = ",") -> str:
-        return sep.join([str(v) for v in c])
-
     crashes1 = read_crashes(
         fuzzer1,
         get_crash_dir(crash_root, fuzzer1, target, seed),
@@ -425,28 +452,21 @@ def crash_analysis_worker(
 
             cluster_ids1 = set()
             cluster_ids2 = set()
-
-    shared_cluster_ids = cluster_ids1 & cluster_ids2
-
-    return {
-        "Target": target,
-        "Fuzzer 1": fuzzer1,
-        "Fuzzer 2": fuzzer2,
-        "Seed": seed,
-        "Metric": metric["name"],
-        "Epsilon (DBSCAN)": epsilon,
-        "#Frames (Stacktraces)": "all" if n_frames is None else n_frames,
-        "#Bugs (Fuzzer 1)": len(cluster_ids1),
-        "#Bugs (Fuzzer 2)": len(cluster_ids2),
-        "Cluster IDs (Fuzzer 1)": to_string(cluster_ids1),
-        "Cluster IDs (Fuzzer 2)": to_string(cluster_ids1),
-        "#Unique Bugs (Fuzzer 1)": len(cluster_ids1 - shared_cluster_ids),
-        "#Unique Bugs (Fuzzer 2)": len(cluster_ids2 - shared_cluster_ids),
-        "#Shared Bugs (Fuzzer 1 & 2)": len(shared_cluster_ids),
-    }
+    return Record(
+        target,
+        fuzzer1,
+        fuzzer2,
+        seed,
+        metric["name"],
+        epsilon,
+        n_frames,
+        cluster_ids1,
+        cluster_ids2,
+        cluster_ids1 & cluster_ids2,
+    )
 
 
-def _starter(t: Tuple) -> Dict:
+def _starter(t: Tuple) -> Record:
     return crash_analysis_worker(*t)
 
 
@@ -584,7 +604,7 @@ def find_crash_clusters(
                         seed,
                         {
                             "name": distance_metric,
-                            "function": distance_metrics[distance_metric],
+                            "function": DISTANCE_METRICS[distance_metric],
                         },
                         epsilon,
                         N_FRAMES,
@@ -594,10 +614,10 @@ def find_crash_clusters(
                     )
                 )
     with multiprocessing.Pool() as pool:
-        fuzzer_crashes = list(pool.map(_starter, worker_inputs))
+        fuzzer_crashes: List[Record] = list(pool.map(_starter, worker_inputs))
 
-    df = pd.DataFrame(fuzzer_crashes)
-    output_file = output_path.joinpath("fuzzer_crashes.csv")
+    df = pd.DataFrame([c.to_dict() for c in fuzzer_crashes])
+    output_file = output_path.joinpath(OUTPUT_CSV_FILE_NAME)
     df.to_csv(output_file, sep=";")
 
 
