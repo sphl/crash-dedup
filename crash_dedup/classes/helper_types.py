@@ -1,7 +1,7 @@
 """
 Typings.
 """
-from typing import Literal
+from typing import Literal, List
 
 FUZZER_TYPES = Literal[
     "afl",

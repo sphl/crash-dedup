@@ -15,7 +15,7 @@ def read_crashes(
     fuzzer: FUZZER_TYPES,
     crash_dir: Path,
     max_no_of_crashes: int,
-    n_frames: int = None,
+    n_frames: Optional[int] = None,
 ) -> List[Crash]:
     """
      Read all (stack-)traces in 'crash_dir'.
@@ -29,7 +29,7 @@ def read_crashes(
     crashes: List[Crash] = [
         {
             "fuzzer": fuzzer,
-            "file_path": crash_dir,
+            "file_path": str(crash_dir),
             "file_content": get_file_content(file),
             "cluster_id": -1,  # ... will be set later
         }
@@ -127,14 +127,14 @@ def _find_files(
     not_in_matcher = partial(_not_in, black_list=exclude_files)
     if recursive:
         source_files = [
-            path.join(root, file)
+            Path(path.join(root, file))
             for root, _, files in walk(source_dir)
             if root not in exclude_dirs
             for file in [f for f in files if extension_matcher(f)]
         ]
     else:
         source_files = [f for f in source_dir.iterdir() if extension_matcher(f.name)]
-    return [Path(f) for f in source_files if not_in_matcher(f)]
+    return [f for f in source_files if not_in_matcher(f)]
 
 
 def _get_file_content(file: Path, n_frames: Optional[int]) -> str:

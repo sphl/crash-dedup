@@ -7,7 +7,7 @@ from shutil import rmtree
 from sys import stdout
 from typing import Any, Optional, Sequence
 
-from click import Choice
+from click import Choice, Context
 from click import Path as click_Path
 from click import echo, group, option
 
@@ -26,7 +26,7 @@ basicConfig(
 _LOGGER = getLogger(__name__)
 
 
-def print_version(ctx, _: Any, value: Any) -> None:
+def print_version(ctx: Context, _: Any, value: Any) -> None:
     """
 
     :param ctx:

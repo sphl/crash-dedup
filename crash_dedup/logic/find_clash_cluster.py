@@ -7,7 +7,7 @@ from multiprocessing import Pool
 from os import path
 from pathlib import Path
 from sys import exc_info
-from typing import Callable, Dict, List, Sequence, Set, Tuple
+from typing import Callable, Dict, List, Sequence, Set, Tuple, cast
 
 import numpy as np
 import pandas as pd
@@ -126,7 +126,7 @@ def _get_crash_clusters(
     and 'epsilon'.
     """
 
-    def _metric(x, y):
+    def _metric(x: Tuple[int, ...], y: Tuple[int, ...]) -> float:
         i, j = int(x[0]), int(y[0])
         return distance_metric(crashes[i], crashes[j])
 
@@ -134,7 +134,7 @@ def _get_crash_clusters(
     model = DBSCAN(metric=_metric, min_samples=1, eps=epsilon, algorithm="brute")
     model.fit(np.arange(len(crashes)).reshape(-1, 1))
     _LOGGER.info("End DBSCAN")
-    return model.labels_
+    return cast(List[int], model.labels_)
 
 
 def _crash_analysis_worker(
