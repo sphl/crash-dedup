@@ -119,9 +119,14 @@ class Crash(TypedDict):
 
 
 def read_crashes(
-    fuzzer: str, crash_dir: pathlib_Path, n_frames: int = None
+    fuzzer: str,
+    crash_dir: pathlib_Path,
+    max_no_of_crashes: int,
+    n_frames: int = None,
 ) -> List[Crash]:
-    """Read all (stack-)traces in 'crash_dir'."""
+    """Read all (stack-)traces in 'crash_dir'.
+    :param max_no_of_crashes:
+    """
 
     def get_file_content(file: str) -> str:
         if n_frames is None:
@@ -140,8 +145,11 @@ def read_crashes(
         }
         for file in find_files(crash_dir, file_exts=["trace"], recursive=True)
     ]
-
-    return list(filter(lambda d: len(d["file_content"]) > 0, crashes))
+    result_list = [d for d in crashes if len(d["file_content"]) > 0]
+    if max_no_of_crashes == -1:
+        return result_list
+    else:
+        return result_list[:max_no_of_crashes]
 
 
 def read(file: str, mode: str = "r") -> str:
@@ -245,15 +253,6 @@ def find_files(
     return list(filter(lambda f: not_in(f, exclude_files), source_files))
 
 
-def mkdir(dir_path: str, overwrite: bool = False) -> None:
-    if not path.exists(dir_path):
-        os.makedirs(dir_path)
-    else:
-        if overwrite:
-            shutil.rmtree(dir_path)
-            os.makedirs(dir_path)
-
-
 # Dictionary with functions to the respective similarity metrics
 distance_metrics = {
     # "cosine"      : Cosine(2).distance,
@@ -336,9 +335,10 @@ def get_crash_clusters(
         i, j = int(x[0]), int(y[0])
         return distance_metric(crashes[i], crashes[j])
 
+    _LOGGER.info("Start DBSCAN")
     model = DBSCAN(metric=_metric, min_samples=1, eps=epsilon, algorithm="brute")
     model.fit(np.arange(len(crashes)).reshape(-1, 1))
-
+    _LOGGER.info("End DBSCAN")
     return model.labels_
 
 
@@ -374,6 +374,7 @@ def crash_analysis_worker(
     n_frames: int,
     output_dir: pathlib_Path,
     draw_venn: bool,
+    max_no_of_crashes: int,
 ) -> Dict:
     """
     Worker routine which (1) reads and clusters the crash-stacktraces of both
@@ -385,10 +386,16 @@ def crash_analysis_worker(
         return sep.join([str(v) for v in c])
 
     crashes1 = read_crashes(
-        fuzzer1, get_crash_dir(crash_root, fuzzer1, target, seed), n_frames
+        fuzzer1,
+        get_crash_dir(crash_root, fuzzer1, target, seed),
+        max_no_of_crashes,
+        n_frames,
     )
     crashes2 = read_crashes(
-        fuzzer2, get_crash_dir(crash_root, fuzzer2, target, seed), n_frames
+        fuzzer2,
+        get_crash_dir(crash_root, fuzzer2, target, seed),
+        max_no_of_crashes,
+        n_frames,
     )
 
     if len(crashes1 + crashes2) == 0:
@@ -511,6 +518,20 @@ def main_group() -> None:
     help="All programms you want to test",
     default=(),
 )
+@option(
+    "--max-no-of-crashes-per-fuzzer",
+    "-M",
+    type=int,
+    help="You can limit the amount of crashes.",
+    default=-1,
+)
+@option(
+    "--overwrite",
+    "-O",
+    is_flag=True,
+    help="If this flag is passed, the script will clean the output directory.",
+    default=False,
+)
 @main_group.command()
 def find_crash_clusters(
     distance_metric: _METRIC_TYPES,
@@ -519,6 +540,8 @@ def find_crash_clusters(
     epsilon: Optional[float],
     fuzzer: Sequence[_FUZZER_TYPES],
     target_program: Sequence[_TARGET_TYPES],
+    max_no_of_crashes_per_fuzzer: int,
+    overwrite: bool,
 ) -> None:
     """
 
@@ -535,7 +558,18 @@ def find_crash_clusters(
     )
     input_path = pathlib_Path(input_directory)
     output_path = pathlib_Path(output_directory)
-    _LOGGER.info("hi")
+
+    if output_path.is_dir():
+        if overwrite:
+            _LOGGER.warning(f"Clean {output_path} and create again.")
+            shutil.rmtree(output_path)
+            output_path.mkdir()
+        else:
+            _LOGGER.info(f"{output_path} already exists. Adding stuff.")
+    else:
+        _LOGGER.info(f"Create {output_path}.")
+        output_path.mkdir()
+
     worker_inputs = []
 
     for target in targets:
@@ -556,6 +590,7 @@ def find_crash_clusters(
                         N_FRAMES,
                         output_path,
                         True,
+                        max_no_of_crashes_per_fuzzer,
                     )
                 )
     with multiprocessing.Pool() as pool:
